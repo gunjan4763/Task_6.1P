@@ -1,0 +1,87 @@
+# Import necessary libraries
+import sys
+import time
+import numpy as np
+import cv2
+from cv_bridge import CvBridge
+import rospy
+from sensor_msgs.msg import CompressedImage
+
+class LaneDetector:
+    def __init__(self):
+        # Initialize the CvBridge for image conversion
+        self.cv_bridge = CvBridge()
+
+        #### REMEMBER TO CHANGE THE TOPIC NAME! #####
+        # Subscribe to the image topic
+        self.image_sub = rospy.Subscriber('/madtp/camera_node/image/compressed', CompressedImage, self.image_callback, queue_size=1)
+        #############################################
+
+        # Initialize the ROS node
+        rospy.init_node("my_lane_detector")
+
+    def image_callback(self, msg):
+        rospy.loginfo("Image received")
+
+        # Convert the ROS image message to an OpenCV image
+        img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+
+        # Process the image to detect lanes
+        img_out = self.process_image(img)
+
+        # Display the processed images
+        self.display_images(img_out)
+
+    def process_image(self, img):
+        # Crop the image to focus on the road area
+        img_cropped = img[200:480, 0:640]
+
+        # Convert the cropped image to HSV color space
+        img_hsv = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2HSV)
+
+        # Define color ranges for white and yellow
+        lower_white, upper_white = np.array([0, 0, 200]), np.array([180, 30, 255])
+        lower_yellow, upper_yellow = np.array([20, 100, 100]), np.array([30, 255, 255])
+
+        # Create masks for white and yellow colors
+        white_mask = cv2.inRange(img_hsv, lower_white, upper_white)
+        yellow_mask = cv2.inRange(img_hsv, lower_yellow, upper_yellow)
+
+        # Apply Canny Edge Detector
+        edges = cv2.Canny(img_cropped, 100, 200)
+
+        # Apply Hough Transform to detect lines
+        lines_white = cv2.HoughLinesP(white_mask, 1, np.pi / 180, 50, maxLineGap=10)
+        lines_yellow = cv2.HoughLinesP(yellow_mask, 1, np.pi / 180, 50, maxLineGap=10)
+
+        # Draw detected lines on the cropped image
+        img_out = self.draw_lines(img_cropped, lines_white, (0, 255, 0))
+        img_out = self.draw_lines(img_out, lines_yellow, (0, 255, 255))
+
+        return img_out
+
+    def draw_lines(self, img, lines, color):
+        # Draw lines on the image
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(img, (x1, y1), (x2, y2), color, 2)
+        return img
+
+    def display_images(self, img_out):
+        # Display the processed image
+        cv2.imshow('Processed Image', img_out)
+        cv2.waitKey(1)
+
+    def run(self):
+        # Keep the node running and listening for messages
+        rospy.spin()
+
+# Main entry point
+if __name__ == "__main__":
+    try:
+        # Create and run the lane detector
+        lane_detector = LaneDetector()
+        lane_detector.run()
+    except rospy.ROSInterruptException:
+        pass
